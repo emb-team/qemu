@@ -63,6 +63,8 @@
 #include "net/net.h"
 #include "hw/core/split-irq.h"
 #include "hw/qdev-clock.h"
+#include "hw/loader.h"
+#include "sysemu/reset.h"
 #include "qom/object.h"
 
 #define MPS2TZ_NUMIRQ 92
@@ -83,7 +85,7 @@ struct MPS2TZMachineState {
     MachineState parent;
 
     ARMSSE iotkit;
-    MemoryRegion ssram[3];
+    MemoryRegion ssram[4];
     MemoryRegion ssram1_m;
     MPS2SCC scc;
     MPS2FPGAIO fpgaio;
@@ -626,7 +628,21 @@ static void mps2tz_common_init(MachineState *machine)
 
     create_unimplemented_device("FPGA NS PC", 0x48007000, 0x1000);
 
-    armv7m_load_kernel(ARM_CPU(first_cpu), machine->kernel_filename, 0x400000);
+    memory_region_init_ram_from_file(&mms->ssram[3],
+                                      NULL,
+                                      "ssram-flash", // name
+                                      0x200000, // 2MB
+                                      0,
+                                      RAM_SHARED,
+                                      "../tfm-fwu/m33_flash.bin",
+				      false,
+                                      &error_fatal);
+    memory_region_add_subregion(get_system_memory(), 0x80000, &mms->ssram[3]); // this is Primary and Secondary slots with offset to kernel
+
+    armv7m_load_kernel(ARM_CPU(first_cpu), machine->kernel_filename, 0x80000);
+    //qemu_register_reset(cpu_reset, ARM_CPU(first_cpu)); // Only if kernel is not passed and armv7m_load_kernel is not called.
+    rom_check_and_register_reset();
+    qemu_devices_reset();
 }
 
 static void mps2_tz_idau_check(IDAUInterface *ii, uint32_t address,
